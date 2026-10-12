@@ -504,16 +504,31 @@ def save_todo(groups):
 
 
 # ---------------------------------------------------------------- 플로팅 창
-# 색: 흰 바탕 + 먹색, 회색 단계로 구분, 포인트 파랑은 하나만
-INK, MUTED, FAINT = "#141414", "#707070", "#ADADAD"
-CANVAS, SOFT, HAIR, ACCENT = "#FFFFFF", "#F3F3F3", "#E0E0E0", "#0066FF"
-STATUS = {  # 상태: (글자, 알약 배경, 알약 글자색)
-    "answer": ("답변 필요", INK, CANVAS),
-    "review": ("검토 필요", ACCENT, CANVAS),
-    "work": ("작업중", SOFT, MUTED),
-    "seen": ("완료 ✓", HAIR, MUTED),
+# 색: 바탕 + 먹색, 회색 단계로 구분, 포인트 파랑은 하나만. 다크는 같은 규칙을 뒤집은 것
+THEMES = {
+    "light": {"INK": "#141414", "MUTED": "#707070", "FAINT": "#ADADAD", "CANVAS": "#FFFFFF", "SOFT": "#F3F3F3",
+              "HAIR": "#E0E0E0", "ACCENT": "#0066FF", "RING": "#C4C4C4", "GRIP": "#CFCFCF"},
+    "dark": {"INK": "#F2F2F3", "MUTED": "#A1A1A6", "FAINT": "#6C6C72", "CANVAS": "#1E1E20", "SOFT": "#2B2B2E",
+             "HAIR": "#3A3A3E", "ACCENT": "#3D8BFF", "RING": "#5A5A60", "GRIP": "#4A4A50"},
 }
 WIDTH = 360
+
+
+def apply_theme(name):
+    """색 이름(INK, CANVAS …)을 고른 테마 값으로 바꿈. 창을 만들기 전에 부름"""
+    global INK, MUTED, FAINT, CANVAS, SOFT, HAIR, ACCENT, RING, GRIP, STATUS
+    t = THEMES.get(name, THEMES["light"])
+    INK, MUTED, FAINT, CANVAS, SOFT = t["INK"], t["MUTED"], t["FAINT"], t["CANVAS"], t["SOFT"]
+    HAIR, ACCENT, RING, GRIP = t["HAIR"], t["ACCENT"], t["RING"], t["GRIP"]
+    STATUS = {  # 상태: (글자, 알약 배경, 알약 글자색)
+        "answer": ("답변 필요", INK, CANVAS),
+        "review": ("검토 필요", ACCENT, "#FFFFFF"),
+        "work": ("작업중", SOFT, MUTED),
+        "seen": ("완료 ✓", HAIR, MUTED),
+    }
+
+
+apply_theme("light")
 
 
 # 알림 소리: 윈도우에 기본으로 들어 있는 소리 중 부드러운 것만 (C:\Windows\Media)
@@ -590,7 +605,8 @@ def round_window(root):
         hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
         dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
         dwm(hwnd, 33, ctypes.byref(ctypes.c_int(2)), 4)          # DWMWA_WINDOW_CORNER_PREFERENCE = 둥글게
-        dwm(hwnd, 34, ctypes.byref(ctypes.c_int(0x00E0E0E0)), 4)  # DWMWA_BORDER_COLOR = HAIR
+        r, g, b = (int(HAIR[i:i + 2], 16) for i in (1, 3, 5))
+        dwm(hwnd, 34, ctypes.byref(ctypes.c_int(r | g << 8 | b << 16)), 4)  # DWMWA_BORDER_COLOR = HAIR
         # 제목줄 없는 창도 작업표시줄에 아이콘이 뜨게 (WS_EX_APPWINDOW)
         u = ctypes.windll.user32
         ex = u.GetWindowLongW(hwnd, -20)
@@ -618,6 +634,7 @@ def board():
 
     if already_running():
         return
+    apply_theme(read_json(CONFIG).get("theme", "light"))  # 아래 부품들이 이 색으로 만들어짐
     DIR.mkdir(parents=True, exist_ok=True)
     pos_file = DIR / "_pos.json"
     root = tk.Tk()
@@ -656,7 +673,7 @@ def board():
             c.create_oval(1, 1, s - 1, s - 1, fill=INK, outline=INK)
             c.create_line(5, 9, 8, 12, 13, 6, fill=CANVAS, width=2, capstyle="round", joinstyle="round")
         else:
-            c.create_oval(1, 1, s - 1, s - 1, outline=HAIR if fn is None else "#C4C4C4", width=1.5)
+            c.create_oval(1, 1, s - 1, s - 1, outline=HAIR if fn is None else RING, width=1.5)
         if fn:
             c.config(cursor="hand2")
             c.bind("<Button-1>", lambda e: fn())
@@ -689,11 +706,20 @@ def board():
     settings = tk.Frame(root, bg=CANVAS, padx=16)  # ⚙ 누르면 머리줄 바로 아래 열리는 설정판
     body = tk.Frame(root, bg=CANVAS)
     addbar = tk.Frame(root, bg=CANVAS, padx=16)  # 직접 추가 줄 (세션 목록과 따로: 입력 중에 안 지워지게)
-    todo = tk.Frame(root, bg=CANVAS)
-    parts_below_head = (body, addbar, todo)
+    # 할 일은 스크롤 상자 안에: 길어져도 창이 화면 밖으로 안 나가고 마우스 휠로 내려봄
+    todo_box = tk.Canvas(root, bg=CANVAS, highlightthickness=0, width=WIDTH, height=1, yscrollincrement=20)
+    todo = tk.Frame(todo_box, bg=CANVAS)
+    todo_box.create_window(0, 0, window=todo, anchor="nw", width=WIDTH)
+    root.bind_all("<MouseWheel>", lambda e: todo_box.yview_scroll(int(-e.delta / 120), "units")
+                  if ui.get("scroll") else None)
+    parts_below_head = (body, addbar, todo_box)
     for p in parts_below_head:
         p.pack(fill="x")
     ui["settings"] = False
+    cfg0 = read_json(CONFIG)
+    ui["reopen"] = bool(cfg0.pop("_reopen_settings", False))  # 테마 바꾸고 다시 켜졌으면 설정판을 다시 열어줌
+    if ui["reopen"]:
+        write_json(CONFIG, cfg0)
 
     def toggle(collapsed=None):
         ui["collapsed"] = not ui["collapsed"] if collapsed is None else collapsed
@@ -779,14 +805,46 @@ def board():
         mr.pack(fill="x", pady=(10, 0))
         check(mr, mute, lambda: save_cfg(mute=not mute)).pack(side="left")
         tk.Label(mr, text="소리 끄기  (파란 점만 켜져요)", bg=SOFT, fg=INK, font=(FONT, 9)).pack(side="left", padx=8)
+
+        tk.Label(box, text="화면", bg=SOFT, fg=MUTED, font=(FONT, 8), anchor="w").pack(fill="x", pady=(12, 4))
+        tr = tk.Frame(box, bg=SOFT)
+        tr.pack(fill="x")
+        theme = read_json(CONFIG).get("theme", "light")
+        for name, label in (("light", "라이트"), ("dark", "다크")):
+            on = name == theme
+            pill(tr, label, INK if on else CANVAS, CANVAS if on else MUTED,
+                 None if on else (lambda n=name: switch_theme(n)), bold=on).pack(side="left", padx=(0, 6))
         fit()
+
+    def switch_theme(name):
+        """색은 창을 만들 때 정해지니까, 저장하고 창을 새로 띄움 (위치·접힘 상태는 그대로)"""
+        import ctypes
+        import subprocess
+        write_json(CONFIG, {**read_json(CONFIG), "theme": name, "_reopen_settings": True})
+        save_pos()
+        ctypes.windll.kernel32.CloseHandle(already_running.handle)  # 새 창이 뜰 수 있게 '하나만 켜기' 표시를 먼저 풂
+        exe = Path(sys.executable)
+        exe = exe.with_name("pythonw.exe") if exe.with_name("pythonw.exe").exists() else exe
+        subprocess.Popen([str(exe), str(Path(__file__).resolve())], cwd=str(Path(__file__).resolve().parent))
+        root.destroy()
 
     def fit():
         root.update_idletasks()
+        sh = root.winfo_screenheight()
+        if not ui["collapsed"]:  # 할 일 상자 높이 = 화면에 남는 만큼까지만, 넘치면 스크롤
+            rest = head.winfo_reqheight() + body.winfo_reqheight() + addbar.winfo_reqheight() + (
+                settings.winfo_reqheight() if ui["settings"] else 0)
+            need = todo.winfo_reqheight()
+            room = max(120, sh - 56 - 8 - rest)
+            ui["scroll"] = need > room
+            todo_box.config(height=min(need, room), scrollregion=(0, 0, WIDTH, need))
+            if not ui["scroll"]:
+                todo_box.yview_moveto(0)
+            root.update_idletasks()
         size = (WIDTH, root.winfo_reqheight())
         if size != ui["size"]:  # 크기가 바뀔 때만 (매번 바꾸면 깜빡임)
             ui["size"] = size
-            old_top, old_h, sh = root.winfo_y(), root.winfo_height(), root.winfo_screenheight()
+            old_top, old_h = root.winfo_y(), root.winfo_height()
             # 화면 아래쪽에 있으면 아랫변을 고정 → 펼치면 위로 자라고, 접으면 다시 아래로 내려감
             top = old_top + old_h - size[1] if old_top + old_h / 2 > sh / 2 else old_top
             top = max(0, min(top, sh - size[1] - 56))  # 화면·작업표시줄 밖으로 안 나가게
@@ -1057,11 +1115,11 @@ def board():
         todo_change(move)
 
     def handle(parent, src):
-        b = tk.Label(parent, text="⠿", bg=parent["bg"], fg="#CFCFCF", font=(FONT, 9), cursor="fleur")
+        b = tk.Label(parent, text="⠿", bg=parent["bg"], fg=GRIP, font=(FONT, 9), cursor="fleur")
         b.bind("<B1-Motion>", lambda e: drag_move(src[0], e))
         b.bind("<ButtonRelease-1>", lambda e: drag_drop(src, e))
         b.bind("<Enter>", lambda e: b.config(fg=INK))
-        b.bind("<Leave>", lambda e: b.config(fg="#CFCFCF"))
+        b.bind("<Leave>", lambda e: b.config(fg=GRIP))
         return b
 
     def draw_group(gi, g):
@@ -1119,6 +1177,8 @@ def board():
     if pos.get("collapsed"):  # 접어둔 채로 껐으면 접힌 채로 시작
         toggle(True)
     draw_addbar()
+    if ui["reopen"]:
+        open_settings(True)
     refresh()
     root.mainloop()
 
