@@ -18,7 +18,7 @@ Claude Code랑 Codex한테 일을 시켜놓고 기다리다가, 딴짓하느라 
 
 컴퓨터 잘 몰라도 괜찮아요. 이 세 가지만 하면 돼요.
 
-1. **[여기를 눌러 ZIP 받기](https://github.com/nyangbdceo/workdeck/archive/refs/heads/main.zip)** → 받은 파일을 우클릭 → **압축 풀기**
+1. **[여기를 눌러 ZIP 받기](https://github.com/nyangbuilder-lab/workdeck/archive/refs/heads/main.zip)** → 받은 파일을 우클릭 → **압축 풀기**
 2. 압축 푼 폴더에서 **`install.bat`** 더블클릭
    - 파란 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행** 을 눌러주세요.
    - Python이 없으면 알아서 같이 설치해요. 확인 창이 뜨면 **[예]** 만 눌러주세요.
@@ -117,7 +117,7 @@ Workdeck은 그 순간마다 "이 대화는 지금 이 상태"라는 작은 메�
 - 훅은 어떤 오류가 나도 조용히 끝나도록 만들어서 Claude Code 작업을 방해하지 않아요. 도구를 쓸 때마다 잠깐(보통 0.1초 정도) 실행돼요.
 - 파이썬 파일 하나(`workdeck.py`)가 전부라서, 실행하기 전에 직접 열어서 읽어보실 수 있어요.
 - `%USERPROFILE%\.claude\hooks\workdeck.py` 는 Claude Code가 계속 실행하는 파일이에요. 이 파일을 아무나 바꾸지 못하게 해주세요. 그리고 다른 사람이 고쳐서 다시 올린 버전은 받지 마세요.
-- 문제를 발견하시면 [Issues](https://github.com/nyangbdceo/workdeck/issues)에 남겨주세요.
+- 문제를 발견하시면 [Issues](https://github.com/nyangbuilder-lab/workdeck/issues)에 남겨주세요.
 
 ## 자주 묻는 질문
 
