@@ -14,6 +14,20 @@ Claude Code랑 Codex한테 일을 시켜놓고 기다리다가, 딴짓하느라 
   <img src="docs/workdeck-collapsed.png" width="380" alt="Workdeck 접은 화면">
 </p>
 
+## 왕초보 설치법 (3분)
+
+컴퓨터 잘 몰라도 괜찮아요. 이 세 가지만 하면 돼요.
+
+1. **[여기를 눌러 ZIP 받기](https://github.com/nyangbdceo/workdeck/archive/refs/heads/main.zip)** → 받은 파일을 우클릭 → **압축 풀기**
+2. 압축 푼 폴더에서 **`install.bat`** 더블클릭
+   - 파란 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행** 을 눌러주세요.
+   - Python이 없으면 알아서 같이 설치해요. 확인 창이 뜨면 **[예]** 만 눌러주세요.
+3. "설치 완료"가 뜨면 끝이에요. Workdeck 창이 바로 떠요.
+
+그다음 Claude Code 대화창을 새로 열고 아무 메시지나 보내보세요. 목록에 바로 나타나요.
+
+> 공식 배포처는 이 저장소 하나예요. 다른 곳에서 받은 파일은 쓰지 마세요.
+
 ## 이런 걸 해줘요
 
 - **Claude Code 대화 상태를 자동으로 보여줘요.** 메시지를 보내면 `작업중`, 권한 승인이나 질문을 기다리면 `답변 필요`, 답변이 끝나면 `검토 필요`로 바뀌어요.
@@ -26,19 +40,15 @@ Claude Code랑 Codex한테 일을 시켜놓고 기다리다가, 딴짓하느라 
 ## 필요한 것
 
 - Windows 10 / 11
-- Python 3.12 이상 ([python.org](https://www.python.org/downloads/)에서 설치, 설치 화면에서 **"Add python.exe to PATH" 꼭 체크**)
+- Python 3.12 이상. 없으면 `install.bat` 이 윈도우 기본 설치 도구(winget)로 Python 3.13을 같이 설치해요.
+  자동 설치가 안 되는 PC라면 [python.org](https://www.python.org/downloads/)에서 직접 설치하고, 설치 첫 화면에서 **"Add python.exe to PATH"** 를 꼭 체크해 주세요.
 - Claude Code (데스크톱 앱의 Code 탭이나 터미널) 그리고/또는 Codex
 
 추가로 설치할 라이브러리는 없어요. 파이썬에 기본으로 들어 있는 것만 써요.
 
-## 설치
+## 설치 자세히
 
-1. 이 페이지 위쪽 초록색 **Code** 버튼 → **Download ZIP**으로 받아서 압축을 풀어요.
-   (공식 배포처는 이 저장소 하나예요. 다른 곳에서 받은 파일은 쓰지 마세요.)
-2. 압축 푼 폴더에서 **`install.bat`** 을 더블클릭해요.
-3. "설치 완료"가 뜨면 Workdeck 창이 바로 떠요.
-4. 작업표시줄에 두고 싶으면 바탕화면의 **Workdeck** 아이콘을 우클릭 → **작업 표시줄에 고정**을 눌러주세요.
-
+작업표시줄에 두고 싶으면 바탕화면의 **Workdeck** 아이콘을 우클릭 → **작업 표시줄에 고정**을 눌러주세요.
 이미 열려 있던 Claude Code 대화는 상태가 안 잡혀요. 새로 연 대화부터 잡히니까 대화창을 한 번 새로 열어주세요.
 
 설치하면 이렇게 바뀌어요. 숨기는 것 없이 전부 적어둘게요.
@@ -107,15 +117,15 @@ Workdeck은 그 순간마다 "이 대화는 지금 이 상태"라는 작은 메�
 - 훅은 어떤 오류가 나도 조용히 끝나도록 만들어서 Claude Code 작업을 방해하지 않아요. 도구를 쓸 때마다 잠깐(보통 0.1초 정도) 실행돼요.
 - 파이썬 파일 하나(`workdeck.py`)가 전부라서, 실행하기 전에 직접 열어서 읽어보실 수 있어요.
 - `%USERPROFILE%\.claude\hooks\workdeck.py` 는 Claude Code가 계속 실행하는 파일이에요. 이 파일을 아무나 바꾸지 못하게 해주세요. 그리고 다른 사람이 고쳐서 다시 올린 버전은 받지 마세요.
-- 문제를 발견하시면 [Issues](../../issues)에 남겨주세요.
+- 문제를 발견하시면 [Issues](https://github.com/nyangbdceo/workdeck/issues)에 남겨주세요.
 
 ## 자주 묻는 질문
 
 **설치했는데 아무것도 안 떠요.**
 이미 열려 있던 Claude Code 대화는 안 잡혀요. 대화창을 새로 열고 메시지를 하나 보내보세요.
 
-**`install.bat` 을 누르면 창이 바로 꺼져요.**
-Python이 없거나 PATH에 안 들어가 있는 경우예요. Python을 다시 설치하면서 "Add python.exe to PATH"를 체크해 주세요.
+**`install.bat` 이 "자동 설치가 안 됐어요"라고 해요.**
+보통 Python 자동 설치가 막힌 경우예요. 창에 나온 안내대로 [python.org](https://www.python.org/downloads/)에서 Python을 설치하면서 "Add python.exe to PATH"를 체크한 다음, `install.bat` 을 다시 실행해 주세요.
 
 **"설치 중단: settings.json 파일을 읽을 수 없어요"가 떠요.**
 `settings.json` 에 주석이나 문법 오류가 있으면 설정을 망가뜨리지 않으려고 일부러 멈춰요. 그 파일을 고친 다음 다시 설치해 주세요.
