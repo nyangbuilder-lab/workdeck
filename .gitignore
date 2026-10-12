@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.tmp
+할일.json
+직접추가.json
+_*.json
