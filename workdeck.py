@@ -627,6 +627,17 @@ def board():
     fold_btn = text_btn(head, "—", lambda: toggle())
     fold_btn.pack(side="right", padx=(0, 10))
 
+    # 알림 소리 켜고 끄기 (이 PC 설정에 기억)
+    def sound_icon():
+        return "🔕" if read_json(CONFIG).get("mute") else "🔔"
+
+    def toggle_sound():
+        write_json(CONFIG, {**read_json(CONFIG), "mute": not read_json(CONFIG).get("mute")})
+        sound_btn.config(text=sound_icon())
+
+    sound_btn = text_btn(head, sound_icon(), toggle_sound, size=9)
+    sound_btn.pack(side="right", padx=(0, 8))
+
     body = tk.Frame(root, bg=CANVAS)
     addbar = tk.Frame(root, bg=CANVAS, padx=16)  # 직접 추가 줄 (세션 목록과 따로: 입력 중에 안 지워지게)
     todo = tk.Frame(root, bg=CANVAS)
@@ -723,12 +734,13 @@ def board():
             hidden = [s for s in sessions if s["hidden"]]
 
             need = {f"{s['file']}{s.get('id', '')}" for s in shown if s["view"] in ("answer", "review")}
-            if need - ui["alert"]:
+            if need - ui["alert"] and not read_json(CONFIG).get("mute"):
                 winsound.MessageBeep(winsound.MB_ICONASTERISK)  # 새로 확인할 게 생기면 소리
             ui["alert"] = need
 
             count = {k: sum(s["view"] == k for s in shown) for k in ("answer", "review", "work")}
-            parts = [f"{STATUS[k][0]} {count[k]}" for k in ("answer", "review", "work") if count[k]]
+            short = {"answer": "답변", "review": "검토", "work": "작업"}  # 머리줄 버튼이 밀려나지 않게 짧게
+            parts = [f"{short[k]} {count[k]}" for k in ("answer", "review", "work") if count[k]]
             summary.config(text=" · ".join(parts) or "쉬는 중", fg=INK if need else MUTED)
             dot.config(fg=ACCENT if need else CANVAS)
 
