@@ -516,6 +516,31 @@ STATUS = {  # 상태: (글자, 알약 배경, 알약 글자색)
 WIDTH = 360
 
 
+# 알림 소리: 윈도우에 기본으로 들어 있는 소리 중 부드러운 것만 (C:\Windows\Media)
+SOUNDS = {
+    "또롱": "Windows Notify Calendar.wav",
+    "톡": "Windows Notify Messaging.wav",
+    "띠링": "Windows Notify Email.wav",
+    "뾰롱": "Speech On.wav",
+    "똑": "Windows Information Bar.wav",
+    "차임": "chimes.wav",
+    "기본 띵": "",  # 윈도우 기본 알림음
+}
+DEFAULT_SOUND = "또롱"
+
+
+def play_sound(key):
+    import winsound
+    wav =Path(os.environ.get("WINDIR", r"C:\Windows")) / "Media" / SOUNDS.get(key, "")
+    try:
+        if SOUNDS.get(key) and wav.exists():
+            winsound.PlaySound(str(wav), winsound.SND_FILENAME | winsound.SND_ASYNC)
+        else:
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    except RuntimeError:
+        pass
+
+
 def ago(sec):
     """분 단위로만 보여줌 (초 단위면 매초 다시 그려야 해서 깜빡임)"""
     m = int(sec) // 60
@@ -557,7 +582,6 @@ def already_running():
 def board():
     import tkinter as tk
     import tkinter.font as tkfont
-    import winsound
     from tkinter import messagebox
 
     if already_running():
@@ -627,15 +651,27 @@ def board():
     fold_btn = text_btn(head, "—", lambda: toggle())
     fold_btn.pack(side="right", padx=(0, 10))
 
-    # 알림 소리 켜고 끄기 (이 PC 설정에 기억)
+    # 알림 소리: 🔔 누르면 메뉴 → 소리 고르기(고르면 미리 들려줌) / 끄기. 이 PC 설정에 기억
     def sound_icon():
         return "🔕" if read_json(CONFIG).get("mute") else "🔔"
 
-    def toggle_sound():
-        write_json(CONFIG, {**read_json(CONFIG), "mute": not read_json(CONFIG).get("mute")})
+    def choose_sound(key):
+        write_json(CONFIG, {**read_json(CONFIG), "mute": key is None, **({"sound": key} if key else {})})
         sound_btn.config(text=sound_icon())
+        if key:
+            play_sound(key)
 
-    sound_btn = text_btn(head, sound_icon(), toggle_sound, size=9)
+    def sound_menu():
+        cfg = read_json(CONFIG)
+        cur = None if cfg.get("mute") else cfg.get("sound", DEFAULT_SOUND)
+        m = tk.Menu(root, tearoff=0, font=(FONT, 9))
+        for key in SOUNDS:
+            m.add_command(label=("✓  " if key == cur else "     ") + key, command=lambda k=key: choose_sound(k))
+        m.add_separator()
+        m.add_command(label=("✓  " if cur is None else "     ") + "소리 끄기", command=lambda: choose_sound(None))
+        m.tk_popup(sound_btn.winfo_rootx(), sound_btn.winfo_rooty() + sound_btn.winfo_height())
+
+    sound_btn = text_btn(head, sound_icon(), sound_menu, size=9)
     sound_btn.pack(side="right", padx=(0, 8))
 
     body = tk.Frame(root, bg=CANVAS)
@@ -734,8 +770,9 @@ def board():
             hidden = [s for s in sessions if s["hidden"]]
 
             need = {f"{s['file']}{s.get('id', '')}" for s in shown if s["view"] in ("answer", "review")}
-            if need - ui["alert"] and not read_json(CONFIG).get("mute"):
-                winsound.MessageBeep(winsound.MB_ICONASTERISK)  # 새로 확인할 게 생기면 소리
+            cfg = read_json(CONFIG)
+            if need - ui["alert"] and not cfg.get("mute"):
+                play_sound(cfg.get("sound", DEFAULT_SOUND))  # 새로 확인할 게 생기면 소리
             ui["alert"] = need
 
             count = {k: sum(s["view"] == k for s in shown) for k in ("answer", "review", "work")}
