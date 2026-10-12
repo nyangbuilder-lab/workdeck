@@ -524,21 +524,53 @@ SOUNDS = {
     "뾰롱": "Speech On.wav",
     "똑": "Windows Information Bar.wav",
     "차임": "chimes.wav",
-    "기본 띵": "",  # 윈도우 기본 알림음
+    "기본 띵": "Windows Background.wav",  # 윈도우 기본 알림음
 }
 DEFAULT_SOUND = "또롱"
+DEFAULT_VOLUME = 70
 
 
-def play_sound(key):
+def sound_settings():
+    """(소리 이름, 크기 0~100, 끔 여부) — 이상한 값은 기본값으로"""
+    cfg = read_json(CONFIG)
+    key = cfg.get("sound") if cfg.get("sound") in SOUNDS else DEFAULT_SOUND
+    vol = int(min(100, max(0, num(cfg.get("volume"), DEFAULT_VOLUME))))
+    return key, vol, bool(cfg.get("mute"))
+
+
+def sound_file(key, volume):
+    """크기를 줄인 소리는 한 번 만들어서 저장해두고 재사용 (윈도우 기본 소리는 16비트라 숫자만 줄이면 됨)"""
+    import array
+    import wave
+    src = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Media" / SOUNDS[key]
+    if volume >= 100:
+        return src
+    out = DIR / f"_sound-{list(SOUNDS).index(key)}-{volume}.wav"
+    if not out.exists():
+        with wave.open(str(src)) as w:
+            params, frames = w.getparams(), w.readframes(w.getnframes())
+        if params.sampwidth != 2:
+            return src
+        samples = array.array("h", frames)
+        scale = (volume / 100) ** 2  # 귀로 듣기에 고르게 줄어들도록 제곱
+        samples = array.array("h", (int(s * scale) for s in samples))
+        DIR.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(out), "wb") as w:
+            w.setparams(params)
+            w.writeframes(samples.tobytes())
+    return out
+
+
+def play_sound(key=None, volume=None):
     import winsound
-    wav =Path(os.environ.get("WINDIR", r"C:\Windows")) / "Media" / SOUNDS.get(key, "")
+    cur_key, cur_vol, _ = sound_settings()
+    key = key if key in SOUNDS else cur_key
+    volume = cur_vol if volume is None else volume
     try:
-        if SOUNDS.get(key) and wav.exists():
-            winsound.PlaySound(str(wav), winsound.SND_FILENAME | winsound.SND_ASYNC)
-        else:
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-    except RuntimeError:
-        pass
+        if volume > 0:
+            winsound.PlaySound(str(sound_file(key, volume)), winsound.SND_FILENAME | winsound.SND_ASYNC)
+    except Exception:  # 소리 파일이 없는 PC면 윈도우 기본음
+        winsound.MessageBeep(winsound.MB_ICONASTERISK)
 
 
 def ago(sec):
@@ -651,44 +683,102 @@ def board():
     fold_btn = text_btn(head, "—", lambda: toggle())
     fold_btn.pack(side="right", padx=(0, 10))
 
-    # 알림 소리: 🔔 누르면 메뉴 → 소리 고르기(고르면 미리 들려줌) / 끄기. 이 PC 설정에 기억
-    def sound_icon():
-        return "🔕" if read_json(CONFIG).get("mute") else "🔔"
+    gear = text_btn(head, "⚙", lambda: open_settings(not ui["settings"]), size=10)
+    gear.pack(side="right", padx=(0, 10))
 
-    def choose_sound(key):
-        write_json(CONFIG, {**read_json(CONFIG), "mute": key is None, **({"sound": key} if key else {})})
-        sound_btn.config(text=sound_icon())
-        if key:
-            play_sound(key)
-
-    def sound_menu():
-        cfg = read_json(CONFIG)
-        cur = None if cfg.get("mute") else cfg.get("sound", DEFAULT_SOUND)
-        m = tk.Menu(root, tearoff=0, font=(FONT, 9))
-        for key in SOUNDS:
-            m.add_command(label=("✓  " if key == cur else "     ") + key, command=lambda k=key: choose_sound(k))
-        m.add_separator()
-        m.add_command(label=("✓  " if cur is None else "     ") + "소리 끄기", command=lambda: choose_sound(None))
-        m.tk_popup(sound_btn.winfo_rootx(), sound_btn.winfo_rooty() + sound_btn.winfo_height())
-
-    sound_btn = text_btn(head, sound_icon(), sound_menu, size=9)
-    sound_btn.pack(side="right", padx=(0, 8))
-
+    settings = tk.Frame(root, bg=CANVAS, padx=16)  # ⚙ 누르면 머리줄 바로 아래 열리는 설정판
     body = tk.Frame(root, bg=CANVAS)
     addbar = tk.Frame(root, bg=CANVAS, padx=16)  # 직접 추가 줄 (세션 목록과 따로: 입력 중에 안 지워지게)
     todo = tk.Frame(root, bg=CANVAS)
     parts_below_head = (body, addbar, todo)
     for p in parts_below_head:
         p.pack(fill="x")
+    ui["settings"] = False
 
     def toggle(collapsed=None):
         ui["collapsed"] = not ui["collapsed"] if collapsed is None else collapsed
-        for p in parts_below_head:
+        for p in (settings, *parts_below_head):
             p.pack_forget()
         if not ui["collapsed"]:
+            if ui["settings"]:
+                settings.pack(fill="x")
             for p in parts_below_head:
                 p.pack(fill="x")
         fold_btn.config(text="＋" if ui["collapsed"] else "—")
+        fit()
+
+    # ---------------- 설정판: 알림 소리 · 소리 크기 · 소리 끄기 (이 PC 설정에 기억)
+    def open_settings(on):
+        ui["settings"] = on
+        gear.config(fg=INK if on else FAINT)
+        if on:
+            draw_settings()
+        toggle(False)  # 접혀 있었으면 펼치면서 보여줌
+
+    def save_cfg(**kw):
+        write_json(CONFIG, {**read_json(CONFIG), **kw})
+        draw_settings()
+
+    def slider(parent, value, on_change, on_done, width=200):
+        """둥근 막대 슬라이더. 끄는 동안 on_change, 놓으면 on_done (5 단위)"""
+        h, r = 22, 7
+        c = tk.Canvas(parent, width=width, height=h, bg=parent["bg"], highlightthickness=0, cursor="hand2")
+
+        def draw(v):
+            c.delete("all")
+            x = r + (width - 2 * r) * v / 100
+            c.create_line(r, h / 2, width - r, h / 2, fill=HAIR, width=4, capstyle="round")
+            c.create_line(r, h / 2, x, h / 2, fill=INK, width=4, capstyle="round")
+            c.create_oval(x - r, h / 2 - r, x + r, h / 2 + r, fill=CANVAS, outline=INK, width=2)
+
+        def value_at(e):
+            return int(round(min(100, max(0, (e.x - r) / (width - 2 * r) * 100)) / 5) * 5)
+
+        def move(e):
+            ui["vol"] = value_at(e)
+            draw(ui["vol"])
+            on_change(ui["vol"])
+
+        c.bind("<Button-1>", move)
+        c.bind("<B1-Motion>", move)
+        c.bind("<ButtonRelease-1>", lambda e: on_done(value_at(e)))
+        draw(value)
+        return c
+
+    def draw_settings():
+        for w in settings.winfo_children():
+            w.destroy()
+        key, vol, mute = sound_settings()
+        box = tk.Frame(settings, bg=SOFT, padx=14, pady=12)
+        box.pack(fill="x", pady=(0, 10))
+
+        top = tk.Frame(box, bg=SOFT)
+        top.pack(fill="x")
+        tk.Label(top, text="설정", bg=SOFT, fg=INK, font=(FONT, 10, "bold")).pack(side="left")
+        pill(top, "닫기", CANVAS, MUTED, lambda: open_settings(False), bold=False).pack(side="right")
+
+        tk.Label(box, text="알림 소리  (누르면 미리 들려줘요)", bg=SOFT, fg=MUTED, font=(FONT, 8),
+                 anchor="w").pack(fill="x", pady=(10, 4))
+        grid = tk.Frame(box, bg=SOFT)
+        grid.pack(fill="x")
+        for i, k in enumerate(SOUNDS):
+            on = k == key and not mute
+            pill(grid, k, INK if on else CANVAS, CANVAS if on else MUTED,
+                 lambda k=k: (save_cfg(sound=k, mute=False), play_sound(k)), bold=on
+                 ).grid(row=i // 4, column=i % 4, sticky="w", padx=(0, 6), pady=3)
+
+        tk.Label(box, text="소리 크기", bg=SOFT, fg=MUTED, font=(FONT, 8), anchor="w").pack(fill="x", pady=(10, 2))
+        vr = tk.Frame(box, bg=SOFT)
+        vr.pack(fill="x")
+        pct = tk.Label(vr, text=f"{vol}%", bg=SOFT, fg=INK, font=(FONT, 9, "bold"), width=5, anchor="e")
+        slider(vr, vol, lambda v: pct.config(text=f"{v}%"),
+               lambda v: (save_cfg(volume=v, mute=False), play_sound(volume=v))).pack(side="left")
+        pct.pack(side="right")
+
+        mr = tk.Frame(box, bg=SOFT)
+        mr.pack(fill="x", pady=(10, 0))
+        check(mr, mute, lambda: save_cfg(mute=not mute)).pack(side="left")
+        tk.Label(mr, text="소리 끄기  (파란 점만 켜져요)", bg=SOFT, fg=INK, font=(FONT, 9)).pack(side="left", padx=8)
         fit()
 
     def fit():
@@ -770,9 +860,8 @@ def board():
             hidden = [s for s in sessions if s["hidden"]]
 
             need = {f"{s['file']}{s.get('id', '')}" for s in shown if s["view"] in ("answer", "review")}
-            cfg = read_json(CONFIG)
-            if need - ui["alert"] and not cfg.get("mute"):
-                play_sound(cfg.get("sound", DEFAULT_SOUND))  # 새로 확인할 게 생기면 소리
+            if need - ui["alert"] and not sound_settings()[2]:
+                play_sound()  # 새로 확인할 게 생기면 설정한 소리·크기로
             ui["alert"] = need
 
             count = {k: sum(s["view"] == k for s in shown) for k in ("answer", "review", "work")}
