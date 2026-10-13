@@ -500,6 +500,8 @@ def load_todo():
 def save_todo(groups):
     f = todo_file()
     f.parent.mkdir(parents=True, exist_ok=True)
+    if f.exists():  # 바로 전 상태를 한 칸 백업 (실수로 지워도 이 파일 이름만 바꾸면 되살릴 수 있음)
+        shutil.copy2(f, f.with_name(f"{f.stem}.이전{f.suffix}"))
     write_json(f, {"groups": groups}, indent=1)
 
 
@@ -873,18 +875,21 @@ def board():
         write_json(pos_file, {"x": root.winfo_x(), "y": root.winfo_y(), "h": root.winfo_height(),
                               "collapsed": ui["collapsed"], "home": ui["home"]})
 
-    def drag_done():
-        """끌어서 옮기면 그 자리가 새 제자리 (펼친 상태면 자라는 방향의 반대쪽 끝 기준)"""
-        top, h, sh = root.winfo_y(), root.winfo_height(), root.winfo_screenheight()
+    def drag_done(e):
+        """실제로 끌어서 옮겼을 때만 그 자리가 새 제자리. 그냥 클릭·더블클릭은 무시"""
+        if abs(e.x_root - ui["px"]) < 4 and abs(e.y_root - ui["py"]) < 4:
+            return
+        top, h = root.winfo_y(), root.winfo_height()
         if ui["collapsed"]:
             ui["home"] = top
-        else:
-            ui["home"] = top + h - bar_h() if top + h / 2 > sh / 2 else top
+        else:  # 펼친 상태면 지금 자라는 방향 기준: 위로 자라는 중이면 아랫변이 제자리
+            ui["home"] = top + h - bar_h() if grows_up() else top
         save_pos()
 
     # 머리줄 잡고 끌어서 이동, 위치 기억
     def press(e):
         ui["dx"], ui["dy"] = e.x_root - root.winfo_x(), e.y_root - root.winfo_y()
+        ui["px"], ui["py"] = e.x_root, e.y_root
 
     def drag(e):
         root.geometry(f"+{e.x_root - ui['dx']}+{e.y_root - ui['dy']}")
@@ -892,7 +897,7 @@ def board():
     for w in (head, name, dot, summary):
         w.bind("<ButtonPress-1>", press)
         w.bind("<B1-Motion>", drag)
-        w.bind("<ButtonRelease-1>", lambda e: drag_done())
+        w.bind("<ButtonRelease-1>", drag_done)
         w.bind("<Double-Button-1>", lambda e: toggle())
 
     # ---------------- 세션 목록
