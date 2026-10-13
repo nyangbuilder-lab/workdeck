@@ -25,7 +25,7 @@ Claude Code랑 Codex한테 일을 시켜놓고 기다리다가, 딴짓하느라 
 
 컴퓨터 잘 몰라도 괜찮아요. 이 세 가지만 하면 돼요.
 
-1. **[여기를 눌러 ZIP 받기](https://github.com/nyangbuilder-lab/workdeck/archive/refs/heads/main.zip)** → 받은 파일을 우클릭 → **압축 풀기**
+1. **[여기를 눌러 ZIP 받기](https://github.com/nyangbuilder-lab/workdeck/releases/latest/download/Workdeck.zip)** → 받은 파일을 우클릭 → **압축 풀기**
 2. 압축 푼 폴더에서 **`install.bat`** 더블클릭
    - 파란 "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행** 을 눌러주세요.
    - Python이 없으면 알아서 같이 설치해요. 확인 창이 뜨면 **[예]** 만 눌러주세요.
