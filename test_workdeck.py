@@ -19,7 +19,7 @@ def run_hook(payload):
                    env=os.environ, check=True, capture_output=True)
 
 
-# 1) 훅: 상태 기록 → 바뀜 → 세션 끝나면 지움
+# 1) 훅: 상태 기록 → 바뀜 → 세션 끝나도(앱 재시작) 남아 있음
 run_hook({"session_id": "abc-123", "hook_event_name": "UserPromptSubmit", "prompt": "첫 줄\n둘째 줄"})
 f = w.DIR / "abc-123.json"
 assert json.loads(f.read_text("utf-8"))["state"] == "work"
@@ -27,7 +27,8 @@ assert json.loads(f.read_text("utf-8"))["last"] == "첫 줄"
 run_hook({"session_id": "abc-123", "hook_event_name": "Stop"})
 assert json.loads(f.read_text("utf-8"))["state"] == "review"
 run_hook({"session_id": "abc-123", "hook_event_name": "SessionEnd"})
-assert not f.exists()
+assert json.loads(f.read_text("utf-8"))["state"] == "review"
+f.unlink()
 
 # 2) 훅: 이상한 session_id로 폴더 밖 파일을 지우거나 쓸 수 없음
 victim = home / ".claude" / "victim.json"

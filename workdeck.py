@@ -38,7 +38,7 @@ EVENT_STATE = {
     "Stop": "review",
 }
 HOOK_EVENTS = {"UserPromptSubmit": "", "PostToolUse": "*", "PreToolUse": "AskUserQuestion",
-               "PermissionRequest": "*", "Notification": "", "Stop": "", "SessionEnd": ""}
+               "PermissionRequest": "*", "Notification": "", "Stop": ""}
 
 
 def write_json(path, data, indent=None):
@@ -99,10 +99,7 @@ def _hook(d):
         return
     DIR.mkdir(parents=True, exist_ok=True)
     f = DIR / f"{sid}.json"
-    if ev == "SessionEnd":
-        f.unlink(missing_ok=True)
-        return
-
+    # SessionEnd는 안 받음: 앱을 껐다 켜기만 해도 오는 신호라 검토할 대화가 사라졌음
     state = EVENT_STATE.get(ev)
     if ev == "Notification" and "permission" in str(d.get("message") or "").lower():
         state = "answer"
@@ -714,17 +711,20 @@ def board():
     gear.pack(side="right", padx=(0, 10))
 
     settings = tk.Frame(root, bg=CANVAS, padx=16)  # ⚙ 누르면 머리줄 바로 아래 열리는 설정판
-    body = tk.Frame(root, bg=CANVAS)
-    addbar = tk.Frame(root, bg=CANVAS, padx=16)  # 직접 추가 줄 (세션 목록과 따로: 입력 중에 안 지워지게)
-    # 할 일은 스크롤 상자 안에: 길어져도 창이 화면 밖으로 안 나가고 마우스 휠로 내려봄
-    todo_box = tk.Canvas(root, bg=CANVAS, highlightthickness=0, width=WIDTH, height=1, yscrollincrement=20)
-    todo = tk.Frame(todo_box, bg=CANVAS)
-    todo_box.create_window(0, 0, window=todo, anchor="nw", width=WIDTH)
-    root.bind_all("<MouseWheel>", lambda e: todo_box.yview_scroll(int(-e.delta / 120), "units")
+    # 머리줄 아래(대화 목록·직접 추가·할 일)는 한 스크롤 상자 안에:
+    # 대화가 많아져도 창이 화면 밖으로 안 나가고, 머리줄은 그대로 둔 채 마우스 휠로 내려봄
+    scroll_box = tk.Canvas(root, bg=CANVAS, highlightthickness=0, width=WIDTH, height=1, yscrollincrement=20)
+    inner = tk.Frame(scroll_box, bg=CANVAS)
+    scroll_box.create_window(0, 0, window=inner, anchor="nw", width=WIDTH)
+    root.bind_all("<MouseWheel>", lambda e: scroll_box.yview_scroll(int(-e.delta / 120), "units")
                   if ui.get("scroll") else None)
-    parts_below_head = (body, addbar, todo_box)
-    for p in parts_below_head:
+    body = tk.Frame(inner, bg=CANVAS)
+    addbar = tk.Frame(inner, bg=CANVAS, padx=16)  # 직접 추가 줄 (세션 목록과 따로: 입력 중에 안 지워지게)
+    todo = tk.Frame(inner, bg=CANVAS)
+    for p in (body, addbar, todo):
         p.pack(fill="x")
+    parts_below_head = (scroll_box,)
+    scroll_box.pack(fill="x")
     ui["settings"] = False
     cfg0 = read_json(CONFIG)
     ui["reopen"] = bool(cfg0.pop("_reopen_settings", False))  # 테마 바꾸고 다시 켜졌으면 설정판을 다시 열어줌
@@ -841,15 +841,14 @@ def board():
     def fit():
         root.update_idletasks()
         sh = root.winfo_screenheight()
-        if not ui["collapsed"]:  # 할 일 상자 높이 = 화면에 남는 만큼까지만, 넘치면 스크롤
-            rest = head.winfo_reqheight() + body.winfo_reqheight() + addbar.winfo_reqheight() + (
-                settings.winfo_reqheight() if ui["settings"] else 0)
-            need = todo.winfo_reqheight()
+        if not ui["collapsed"]:  # 스크롤 상자 높이 = 화면에 남는 만큼까지만, 넘치면 스크롤
+            rest = head.winfo_reqheight() + (settings.winfo_reqheight() if ui["settings"] else 0)
+            need = inner.winfo_reqheight()
             room = max(120, sh - 56 - 8 - rest)
             ui["scroll"] = need > room
-            todo_box.config(height=min(need, room), scrollregion=(0, 0, WIDTH, need))
+            scroll_box.config(height=min(need, room), scrollregion=(0, 0, WIDTH, need))
             if not ui["scroll"]:
-                todo_box.yview_moveto(0)
+                scroll_box.yview_moveto(0)
             root.update_idletasks()
         size = (WIDTH, root.winfo_reqheight())
         if size != ui["size"]:  # 크기가 바뀔 때만 (매번 바꾸면 깜빡임)
