@@ -648,6 +648,14 @@ def board():
     x = int(num(pos.get("x"), root.winfo_screenwidth() - WIDTH - 24))
     y = int(num(pos.get("y"), 80))
     ui = {"collapsed": False, "alert": set(), "show_hidden": False, "sig": None, "size": None}
+    # 제자리(접은 막대 위치). 예전 설정이면 지금 위치에서 짐작
+    h0 = int(num(pos.get("h"), 48))
+    if "home" in pos:
+        ui["home"] = int(num(pos["home"], y))
+    elif pos.get("collapsed") or y + h0 / 2 <= root.winfo_screenheight() / 2:
+        ui["home"] = y
+    else:
+        ui["home"] = y + h0 - 48
 
     # ---------------- 공통 부품: 알약 버튼, 동그란 체크
     def pill(parent, text, bg, fg, fn=None, size=8, bold=True):
@@ -844,16 +852,35 @@ def board():
         size = (WIDTH, root.winfo_reqheight())
         if size != ui["size"]:  # 크기가 바뀔 때만 (매번 바꾸면 깜빡임)
             ui["size"] = size
-            old_top, old_h = root.winfo_y(), root.winfo_height()
-            # 화면 아래쪽에 있으면 아랫변을 고정 → 펼치면 위로 자라고, 접으면 다시 아래로 내려감
-            top = old_top + old_h - size[1] if old_top + old_h / 2 > sh / 2 else old_top
-            top = max(0, min(top, sh - size[1] - 56))  # 화면·작업표시줄 밖으로 안 나가게
-            root.geometry(f"{size[0]}x{size[1]}+{root.winfo_x()}+{top}")
-            save_pos(top, size[1])
+            root.geometry(f"{size[0]}x{size[1]}+{root.winfo_x()}+{top_for(size[1])}")
+            save_pos()
 
-    def save_pos(top=None, h=None):
-        write_json(pos_file, {"x": root.winfo_x(), "y": root.winfo_y() if top is None else top,
-                              "h": root.winfo_height() if h is None else h, "collapsed": ui["collapsed"]})
+    # 제자리 = 접은 막대가 있는 자리. 펼치면 제자리를 기준으로 자라고, 접으면 정확히 제자리로 돌아감
+    # (막대가 화면 아래쪽 절반에 있으면 위로, 위쪽 절반이면 아래로 펼쳐짐)
+    def bar_h():
+        return head.winfo_reqheight()
+
+    def grows_up():
+        return ui["home"] + bar_h() / 2 > root.winfo_screenheight() / 2
+
+    def top_for(h):
+        sh = root.winfo_screenheight()
+        top = ui["home"] if ui["collapsed"] or not grows_up() else ui["home"] + bar_h() - h
+        return max(0, min(top, sh - h - 56))  # 화면·작업표시줄 밖으로 안 나가게
+
+    def save_pos():
+        root.update_idletasks()
+        write_json(pos_file, {"x": root.winfo_x(), "y": root.winfo_y(), "h": root.winfo_height(),
+                              "collapsed": ui["collapsed"], "home": ui["home"]})
+
+    def drag_done():
+        """끌어서 옮기면 그 자리가 새 제자리 (펼친 상태면 자라는 방향의 반대쪽 끝 기준)"""
+        top, h, sh = root.winfo_y(), root.winfo_height(), root.winfo_screenheight()
+        if ui["collapsed"]:
+            ui["home"] = top
+        else:
+            ui["home"] = top + h - bar_h() if top + h / 2 > sh / 2 else top
+        save_pos()
 
     # 머리줄 잡고 끌어서 이동, 위치 기억
     def press(e):
@@ -865,7 +892,7 @@ def board():
     for w in (head, name, dot, summary):
         w.bind("<ButtonPress-1>", press)
         w.bind("<B1-Motion>", drag)
-        w.bind("<ButtonRelease-1>", lambda e: save_pos())
+        w.bind("<ButtonRelease-1>", lambda e: drag_done())
         w.bind("<Double-Button-1>", lambda e: toggle())
 
     # ---------------- 세션 목록
