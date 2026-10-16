@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 home = Path(tempfile.mkdtemp())
@@ -114,5 +115,19 @@ assert c["title"] == "내 이름" and c["prio"] == 3 and c["state"] == "work", c
 w.set_meta(c, my_title=None, prio=None)
 c = [s for s in w.load_sessions() if s["src"] == "Claude"][0]
 assert c["title"] != "내 이름" and c["prio"] == 0
+
+# 10) 자리 고정: 상태가 바뀌어도 순서 그대로, 끌어서 정한 위치(pos)가 우선
+w.manual_file().write_text(json.dumps({"items": []}), "utf-8")
+for t_ in ("A", "B", "C"):
+    w.manual_add(t_)
+    time.sleep(0.01)
+names = lambda: [s["title"] for s in w.load_sessions() if s["src"] == "직접"]
+assert names() == ["C", "B", "A"], names()          # 새로 생긴 게 위
+a = [s for s in w.load_sessions() if s["title"] == "A"][0]
+w.manual_next_state(a)                                # A 상태가 바뀌어도
+assert names() == ["C", "B", "A"], names()          # 자리는 그대로
+ss = {s["title"]: s for s in w.load_sessions() if s["src"] == "직접"}
+w.set_meta(ss["A"], pos=ss["C"]["pos"] - 1)          # A를 맨 위로 끌어다 놓은 것
+assert names() == ["A", "C", "B"], names()
 
 print("ok")

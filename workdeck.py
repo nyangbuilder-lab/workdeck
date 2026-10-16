@@ -113,7 +113,8 @@ def _hook(d):
 
     # 상태가 바뀌면 완료·숨김은 풀림 (새 일이 생긴 거니까)
     new = {**cur, "state": state, "cwd": str(d.get("cwd") or cur.get("cwd", "")),
-           "updated": time.time(), "seen": False, "hidden": False, "since": time.time()}
+           "updated": time.time(), "seen": False, "hidden": False, "since": time.time(),
+           "created": cur.get("created", time.time())}
     if ev == "UserPromptSubmit":
         new["last"] = first_line(d.get("prompt"))
     write_json(f, new)
@@ -296,6 +297,7 @@ def claude_sessions(now):
         tr = next(CLAUDE_PROJECTS.glob(f"*/{f.stem}.jsonl"), None)
         title, last = (cached(tr, claude_transcript) if tr else None) or ("", "")
         out.append({**s, "src": "Claude", "file": f, "since": num(s.get("since"), now),
+                    "created": num(s.get("created"), f.stat().st_ctime),
                     "title": title or str(s.get("title", "")), "last": last or str(s.get("last", "")),
                     "seen": bool(s.get("seen")), "hidden": bool(s.get("hidden"))})
     return out
@@ -379,7 +381,8 @@ def codex_sessions(now):
         s = {"src": "GPT", "file": mark, "state": state, "since": since, "cwd": cwd,
              "title": titles.get(sid, ""), "last": "", "updated": mtime,
              "seen": m.get("seen") == since, "hidden": m.get("hidden") == since,
-             "my_title": m.get("my_title"), "prio": m.get("prio")}
+             "my_title": m.get("my_title"), "prio": m.get("prio"), "pos": m.get("pos"),
+             "created": f.stat().st_ctime}
         if not expired(s, now):
             out.append(s)
     return out
@@ -398,8 +401,9 @@ def load_sessions():
         if isinstance(s.get("my_title"), str) and s["my_title"].strip():  # Workdeck에서 직접 바꾼 이름이 우선
             s["title"] = s["my_title"].strip()[:60]
         s["prio"] = s.get("prio") if s.get("prio") in PRIOS else 0
-    # 완료는 맨 아래, 나머지는 우선순위 1 → 5 → 없음, 같으면 답변 필요 → 검토 → 작업중, 최근 것 먼저
-    return sorted(out, key=lambda s: (s["view"] == "seen", s["prio"] or 9, ORDER[s["view"]], -s["since"]))
+        s["pos"] = num(s.get("pos"), -num(s.get("created"), s["since"]))
+    # 우선순위 1 → 5 → 없음, 같은 순위 안에서는 위치(끌어서 정한 자리, 기본은 새로 생긴 대화가 위). 상태가 바뀌어도 자리 그대로
+    return sorted(out, key=lambda s: (s["prio"] or 9, s["pos"]))
 
 
 # ---------------------------------------------------------------- 저장 위치 (할 일·직접 추가)
@@ -444,6 +448,7 @@ def manual_items():
         if isinstance(m, dict) and isinstance(m.get("id"), str) and m.get("state") in ORDER:
             out.append({**m, "src": "직접", "file": manual_file(), "cwd": "", "last": "",
                         "title": str(m.get("title", "")), "since": num(m.get("since")),
+                        "created": num(m["id"][1:]) / 1e9 if m["id"][1:].isdigit() else num(m.get("since")),
                         "seen": bool(m.get("seen")), "hidden": bool(m.get("hidden"))})
     return out
 
@@ -971,8 +976,11 @@ def board():
         check(r, bool(s.get("seen")), lambda: act(check_done)).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10), pady=2)
         text = (s.get("title") or s.get("last") or folder_of(s) or "새 대화")[:22]
         fg = FAINT if done else MUTED if s["view"] == "work" else INK
-        tf = tk.Frame(r, bg=CANVAS)  # [우선순위] [제목]
+        tf = tk.Frame(r, bg=CANVAS)  # [⠿] [우선순위] [제목]
         tf.grid(row=0, column=1, sticky="w")
+        if not hidden_list:  # ⠿ 잡고 위아래로 끌면 자리 옮기기
+            session_grip(tf, s).pack(side="left", padx=(0, 4))
+            ui["rows"].append((r, s))
         prio_badge(tf, s).pack(side="left", padx=(0, 6))
         key = (str(s["file"]), s.get("id"))
         if ui.get("renaming") == key:  # ✎ 누른 줄: 제목 대신 입력칸
@@ -1003,6 +1011,54 @@ def board():
             text_btn(btns, "✎", lambda: start_rename(key), fg=HAIR, size=8).pack(side="left", padx=(0, 8))  # 이름 바꾸기
             text_btn(btns, "✕", lambda: act(lambda: set_flag(s, "hidden", True)), fg=HAIR, size=8
                      ).pack(side="left", padx=(0, 6))  # 숨기기
+
+    # ---------------- 대화 끌어서 옮기기 (⠿). 놓은 자리의 위·아래 사이 값으로 위치를 정함
+    def session_grip(parent, s):
+        g = tk.Label(parent, text="⠿", bg=parent["bg"], fg=GRIP, font=(FONT, 9), cursor="fleur")
+        g.bind("<ButtonPress-1>", lambda e: ui.update(dragging=True))
+        g.bind("<B1-Motion>", lambda e: session_drag_move(e))
+        g.bind("<ButtonRelease-1>", lambda e: session_drop(s, e))
+        g.bind("<Enter>", lambda e: g.config(fg=INK))
+        g.bind("<Leave>", lambda e: g.config(fg=GRIP))
+        return g
+
+    def session_spot(y_root, me):
+        """커서 위치 → (바로 위 대화, 바로 아래 대화, 파란 줄 y)"""
+        rows = [(f, x) for f, x in ui["rows"] if x is not me]
+        prev = None
+        for f, x in rows:
+            top = f.winfo_rooty()
+            if y_root < top + f.winfo_height() / 2:
+                return prev, x, top - body.winfo_rooty()
+            prev = x
+        last = rows[-1][0] if rows else body
+        return prev, None, last.winfo_rooty() + last.winfo_height() - body.winfo_rooty()
+
+    def session_drag_move(e):
+        line = ui.get("sline")
+        if line is None or not line.winfo_exists():
+            line = ui["sline"] = tk.Frame(body, bg=ACCENT, height=2)
+        _, _, y = session_spot(e.y_root, None)
+        line.place(x=16, y=max(0, y - 1), width=WIDTH - 32)
+        line.lift()
+
+    def session_drop(s, e):
+        ui["dragging"] = False
+        if ui.get("sline") is not None and ui["sline"].winfo_exists():
+            ui["sline"].place_forget()
+        prev, nxt, _ = session_spot(e.y_root, s)
+        if prev is None and nxt is None:
+            return
+        if prev is None:
+            pos = nxt["pos"] - 1
+        elif nxt is None:
+            pos = prev["pos"] + 1
+        else:
+            pos = (prev["pos"] + nxt["pos"]) / 2
+        near = nxt if nxt is not None else prev  # 다른 우선순위 묶음 사이에 놓으면 그 자리의 우선순위로
+        if prev is not None and nxt is not None and prev["prio"] == s["prio"]:
+            near = prev
+        act(lambda: set_meta(s, pos=pos, prio=near["prio"] or None))
 
     # ---------------- 우선순위 동그라미: 누를 때마다 1 → 2 → 3 → 4 → 5 → 없음 (1이 가장 진함)
     PRIO_LOOK = {1: (ACCENT, "#FFFFFF"), 2: (INK, CANVAS), 3: (MUTED, CANVAS), 4: (HAIR, INK), 5: (SOFT, MUTED)}
@@ -1085,7 +1141,7 @@ def board():
             # 목록 모양(대화·상태·제목)이 바뀔 때만 다시 그림. "몇 분째"는 글자만 바꿔서 깜빡임 없음
             sig = (tuple((str(s["file"]), s.get("id"), s["view"], s["hidden"], s.get("title"), s.get("cwd"), s["prio"],
                           s["since"]) for s in sessions), ui["show_hidden"])
-            if ui.get("renaming") and ui["sig"] is not None:
+            if (ui.get("renaming") or ui.get("dragging")) and ui["sig"] is not None:
                 pass  # 이름 고치는 중엔 목록을 다시 그리지 않음 (입력이 날아가지 않게)
             elif sig != ui["sig"]:
                 ui["sig"] = sig
@@ -1129,7 +1185,7 @@ def board():
         fit()
 
     def draw_sessions(shown, hidden):
-        ui["metas"] = []
+        ui["metas"], ui["rows"], ui["sline"] = [], [], None
         for w in body.winfo_children():
             w.destroy()
         for s in shown:
