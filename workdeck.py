@@ -393,7 +393,8 @@ def load_sessions():
     now = time.time()
     out = claude_sessions(now) + codex_sessions(now) + manual_items()
     for s in out:
-        s["view"] = "seen" if s.get("seen") else s["state"]  # 완료로 눌러둔 건 맨 아래로
+        s["view"] = "seen" if s.get("seen") else s["state"]
+        s["hidden"] = bool(s.get("hidden")) or s["view"] == "seen"  # 완료(체크)한 건 언제 체크했든 숨긴 항목으로
         if isinstance(s.get("my_title"), str) and s["my_title"].strip():  # Workdeck에서 직접 바꾼 이름이 우선
             s["title"] = s["my_title"].strip()[:60]
         s["prio"] = s.get("prio") if s.get("prio") in PRIOS else 0
@@ -993,7 +994,7 @@ def board():
         if hidden_list:
             btns = tk.Frame(r, bg=CANVAS)
             btns.grid(row=1, column=2, sticky="e", pady=(4, 0))
-            pill(btns, "되돌리기", SOFT, ACCENT, lambda: act(lambda: set_flag(s, "hidden", False)), bold=False
+            pill(btns, "되돌리기", SOFT, ACCENT, lambda: act(lambda: (set_flag(s, "seen", False), set_flag(s, "hidden", False))), bold=False
                  ).pack(side="left")
             text_btn(btns, "✕", lambda: act(lambda: remove_session(s)), fg=HAIR, size=8).pack(side="left", padx=(6, 6))
         else:

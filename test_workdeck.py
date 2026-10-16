@@ -103,8 +103,8 @@ w.set_meta(ss["다"], prio=1)
 w.set_meta(ss["가"], prio=5)
 w.set_meta(ss["나"], prio=2, my_title="나 새이름")
 w.set_flag(ss["가"], "seen", True)
-order = [s["title"] for s in w.load_sessions() if s["src"] == "직접"]
-assert order == ["다", "나 새이름", "가"], order
+order = [(s["title"], s["hidden"]) for s in w.load_sessions() if s["src"] == "직접"]
+assert order == [("다", False), ("나 새이름", False), ("가", True)], order  # 완료한 '가'는 숨긴 항목으로
 run_hook({"session_id": "pr-1", "hook_event_name": "Stop"})
 c = [s for s in w.load_sessions() if s["src"] == "Claude"][0]
 w.set_meta(c, prio=3, my_title="내 이름")
