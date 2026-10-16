@@ -961,7 +961,13 @@ def board():
         r.columnconfigure(1, weight=1)
         # 체크나 상태 알약을 누르면 완료 ↔ 원래 상태. 그 대화에 새 작업이 생기면 완료는 자동으로 풀림
         fn = lambda: act(lambda: set_flag(s, "seen", not s.get("seen")))
-        check(r, bool(s.get("seen")), fn).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10), pady=2)
+
+        def check_done():  # 체크하면 완료 + 숨긴 항목으로, 숨긴 항목에서 체크를 풀면 다시 목록으로
+            on = not s.get("seen")
+            set_flag(s, "seen", on)
+            set_flag(s, "hidden", on)
+
+        check(r, bool(s.get("seen")), lambda: act(check_done)).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10), pady=2)
         text = (s.get("title") or s.get("last") or folder_of(s) or "새 대화")[:22]
         fg = FAINT if done else MUTED if s["view"] == "work" else INK
         tf = tk.Frame(r, bg=CANVAS)  # [우선순위] [제목]
@@ -1010,9 +1016,18 @@ def board():
             c.create_text(size / 2, size / 2, text=str(p), fill=fg, font=(FONT, 8, "bold"))
         else:
             c.create_oval(2, 2, size - 2, size - 2, outline=HAIR, dash=(2, 2))
-        nxt = (p + 1) % (len(PRIOS) + 1)
-        c.bind("<Button-1>", lambda e: act(lambda: set_meta(s, prio=nxt or None)))
+        c.bind("<Button-1>", lambda e: prio_menu(c, s))
         return c
+
+    def prio_menu(anchor, s):
+        """동그라미를 누르면 1~5·없음 중에 고르는 작은 메뉴"""
+        m = tk.Menu(root, tearoff=0, font=(FONT, 9), bg=CANVAS, fg=INK, activebackground=SOFT,
+                    activeforeground=INK, bd=0)
+        for p in (*PRIOS, 0):
+            mark = "✓ " if s["prio"] == p else "    "
+            m.add_command(label=f"{mark}{f'{p}순위' if p else '없음'}",
+                          command=lambda p=p: act(lambda: set_meta(s, prio=p or None)))
+        m.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
 
     # ---------------- 이름 바꾸기 (Workdeck 안에서만, Claude 앱 제목은 그대로)
     def start_rename(key):
@@ -1120,9 +1135,18 @@ def board():
             row(s)
         if hidden:
             arrow = "▴" if ui["show_hidden"] else "▾"
-            text_btn(body, f"숨긴 항목 {len(hidden)}개 {arrow}",
+            hb = tk.Frame(body, bg=CANVAS)
+            hb.pack(fill="x", padx=16, pady=(4, 8))
+            text_btn(hb, f"숨긴 항목 {len(hidden)}개 {arrow}",
                      lambda: act(lambda: ui.update(show_hidden=not ui["show_hidden"])),
-                     fg=MUTED, size=8).pack(anchor="w", padx=16, pady=(4, 8))
+                     fg=MUTED, size=8).pack(side="left")
+
+            def clear_hidden():
+                msg = f"숨긴 항목 {len(hidden)}개를 목록에서 모두 지울까요?\n(그 대화에서 새 작업이 시작되면 다시 나타나요)"
+                if messagebox.askyesno("숨긴 항목 지우기", msg, parent=root):
+                    act(lambda: [remove_session(h) for h in hidden])
+
+            text_btn(hb, "모두 지우기", clear_hidden, fg=FAINT, size=8).pack(side="right")
             if ui["show_hidden"]:
                 for s in hidden:
                     row(s, hidden_list=True)
