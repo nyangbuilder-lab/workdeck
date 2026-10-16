@@ -378,13 +378,15 @@ def codex_sessions(now):
             continue
         s = {"src": "GPT", "file": mark, "state": state, "since": since, "cwd": cwd,
              "title": titles.get(sid, ""), "last": "", "updated": mtime,
-             "seen": m.get("seen") == since, "hidden": m.get("hidden") == since}
+             "seen": m.get("seen") == since, "hidden": m.get("hidden") == since,
+             "my_title": m.get("my_title"), "prio": m.get("prio")}
         if not expired(s, now):
             out.append(s)
     return out
 
 
 ORDER = {"answer": 0, "review": 1, "work": 2, "seen": 3}
+PRIOS = (1, 2, 3, 4, 5)  # 우선순위 단계
 
 
 def load_sessions():
@@ -392,7 +394,11 @@ def load_sessions():
     out = claude_sessions(now) + codex_sessions(now) + manual_items()
     for s in out:
         s["view"] = "seen" if s.get("seen") else s["state"]  # 완료로 눌러둔 건 맨 아래로
-    return sorted(out, key=lambda s: (ORDER[s["view"]], -s["since"]))
+        if isinstance(s.get("my_title"), str) and s["my_title"].strip():  # Workdeck에서 직접 바꾼 이름이 우선
+            s["title"] = s["my_title"].strip()[:60]
+        s["prio"] = s.get("prio") if s.get("prio") in PRIOS else 0
+    # 완료는 맨 아래, 나머지는 우선순위 1 → 5 → 없음, 같으면 답변 필요 → 검토 → 작업중, 최근 것 먼저
+    return sorted(out, key=lambda s: (s["view"] == "seen", s["prio"] or 9, ORDER[s["view"]], -s["since"]))
 
 
 # ---------------------------------------------------------------- 저장 위치 (할 일·직접 추가)
@@ -477,6 +483,14 @@ def remove_session(s):
         write_json(s["file"], {**read_json(s["file"]), "gone": s["since"]})
     else:
         s["file"].unlink(missing_ok=True)
+
+
+def set_meta(s, **kw):
+    """이름(my_title)·우선순위(prio)처럼 상태가 바뀌어도 계속 남는 값 저장"""
+    if s["src"] == "직접":
+        manual_update(s, lambda m: {**m, **kw})
+    else:
+        write_json(s["file"], {**read_json(s["file"]), **kw})
 
 
 def set_flag(s, key, on):
@@ -948,11 +962,19 @@ def board():
         # 체크나 상태 알약을 누르면 완료 ↔ 원래 상태. 그 대화에 새 작업이 생기면 완료는 자동으로 풀림
         fn = lambda: act(lambda: set_flag(s, "seen", not s.get("seen")))
         check(r, bool(s.get("seen")), fn).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10), pady=2)
-        text = (s.get("title") or s.get("last") or folder_of(s) or "새 대화")[:24]
+        text = (s.get("title") or s.get("last") or folder_of(s) or "새 대화")[:22]
         fg = FAINT if done else MUTED if s["view"] == "work" else INK
-        title = tk.Label(r, text=text, bg=CANVAS, fg=fg, font=(FONT, 10, "bold"), anchor="w")
-        title.grid(row=0, column=1, sticky="w")
-        if s["src"] == "Claude":  # 제목을 누르면 Claude 앱에서 그 대화로 바로 이동
+        tf = tk.Frame(r, bg=CANVAS)  # [우선순위] [제목]
+        tf.grid(row=0, column=1, sticky="w")
+        prio_badge(tf, s).pack(side="left", padx=(0, 6))
+        key = (str(s["file"]), s.get("id"))
+        if ui.get("renaming") == key:  # ✎ 누른 줄: 제목 대신 입력칸
+            name_entry(tf, s).pack(side="left", fill="x", expand=True)
+            title = None
+        else:
+            title = tk.Label(tf, text=text, bg=CANVAS, fg=fg, font=(FONT, 10, "bold"), anchor="w")
+            title.pack(side="left")
+        if title is not None and s["src"] == "Claude":  # 제목을 누르면 Claude 앱에서 그 대화로 바로 이동
             title.config(cursor="hand2")
             title.bind("<Enter>", lambda e: title.config(fg=ACCENT))
             title.bind("<Leave>", lambda e: title.config(fg=fg))
@@ -969,8 +991,60 @@ def board():
                  ).pack(side="left")
             text_btn(btns, "✕", lambda: act(lambda: remove_session(s)), fg=HAIR, size=8).pack(side="left", padx=(6, 6))
         else:
-            text_btn(r, "✕", lambda: act(lambda: set_flag(s, "hidden", True)), fg=HAIR, size=8
-                     ).grid(row=1, column=2, sticky="e", padx=(0, 6), pady=(2, 0))  # 숨기기
+            btns = tk.Frame(r, bg=CANVAS)
+            btns.grid(row=1, column=2, sticky="e", pady=(2, 0))
+            text_btn(btns, "✎", lambda: start_rename(key), fg=HAIR, size=8).pack(side="left", padx=(0, 8))  # 이름 바꾸기
+            text_btn(btns, "✕", lambda: act(lambda: set_flag(s, "hidden", True)), fg=HAIR, size=8
+                     ).pack(side="left", padx=(0, 6))  # 숨기기
+
+    # ---------------- 우선순위 동그라미: 누를 때마다 1 → 2 → 3 → 4 → 5 → 없음 (1이 가장 진함)
+    PRIO_LOOK = {1: (ACCENT, "#FFFFFF"), 2: (INK, CANVAS), 3: (MUTED, CANVAS), 4: (HAIR, INK), 5: (SOFT, MUTED)}
+
+    def prio_badge(parent, s):
+        size = 18
+        c = tk.Canvas(parent, width=size, height=size, bg=parent["bg"], highlightthickness=0, cursor="hand2")
+        p = s["prio"]
+        if p:
+            bg, fg = PRIO_LOOK[p]
+            c.create_oval(1, 1, size - 1, size - 1, fill=bg, outline=bg)
+            c.create_text(size / 2, size / 2, text=str(p), fill=fg, font=(FONT, 8, "bold"))
+        else:
+            c.create_oval(2, 2, size - 2, size - 2, outline=HAIR, dash=(2, 2))
+        nxt = (p + 1) % (len(PRIOS) + 1)
+        c.bind("<Button-1>", lambda e: act(lambda: set_meta(s, prio=nxt or None)))
+        return c
+
+    # ---------------- 이름 바꾸기 (Workdeck 안에서만, Claude 앱 제목은 그대로)
+    def start_rename(key):
+        ui["renaming"] = key
+        ui["sig"] = None
+        refresh(reschedule=False)
+
+    def name_entry(parent, s):
+        """이름 입력칸 + 저장·✕. Enter·저장·다른 곳 클릭 = 저장, Esc·✕ = 취소"""
+        box = tk.Frame(parent, bg=CANVAS)
+        e = tk.Entry(box, bg=SOFT, fg=INK, relief="flat", font=(FONT, 10, "bold"), insertbackground=INK, width=14)
+        e.pack(side="left", ipady=2)
+        e.insert(0, s.get("title") or "")
+        e.select_range(0, "end")
+        done = {"v": False}
+
+        def finish(save):
+            if done["v"]:
+                return
+            done["v"] = True
+            ui["renaming"] = None
+            if save:
+                set_meta(s, my_title=e.get().strip() or None)  # 비우고 저장하면 원래 이름으로
+            root.after_idle(lambda: act(lambda: None))
+
+        pill(box, "저장", INK, CANVAS, lambda: finish(True), bold=False).pack(side="left", padx=(6, 0))
+        text_btn(box, "✕", lambda: finish(False), fg=FAINT, size=8).pack(side="left", padx=(6, 0))
+        e.bind("<Return>", lambda _: finish(True))
+        e.bind("<Escape>", lambda _: finish(False))
+        e.bind("<FocusOut>", lambda _: root.after(150, lambda: finish(True)))  # 다른 데 누르면 저장하고 닫힘
+        e.after(50, e.focus_force)
+        return box
 
     def refresh(reschedule=True):
         try:
@@ -993,9 +1067,11 @@ def board():
                 dot.config(fg=head_look[2])
 
             # 목록 모양(대화·상태·제목)이 바뀔 때만 다시 그림. "몇 분째"는 글자만 바꿔서 깜빡임 없음
-            sig = (tuple((str(s["file"]), s.get("id"), s["view"], s["hidden"], s.get("title"), s.get("cwd"),
+            sig = (tuple((str(s["file"]), s.get("id"), s["view"], s["hidden"], s.get("title"), s.get("cwd"), s["prio"],
                           s["since"]) for s in sessions), ui["show_hidden"])
-            if sig != ui["sig"]:
+            if ui.get("renaming") and ui["sig"] is not None:
+                pass  # 이름 고치는 중엔 목록을 다시 그리지 않음 (입력이 날아가지 않게)
+            elif sig != ui["sig"]:
                 ui["sig"] = sig
                 draw_sessions(shown, hidden)
             else:

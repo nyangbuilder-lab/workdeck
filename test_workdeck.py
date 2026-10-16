@@ -94,4 +94,25 @@ assert not w.open_claude_session("cli-2")          # 이상한 앱 번호는 열
 assert not w.open_claude_session("../x") and not w.open_claude_session("none")
 assert len(opened) == 1
 
+# 9) 이름 바꾸기·우선순위: 상태가 바뀌어도 남고, 우선순위 순서로 정렬 (완료는 맨 아래)
+w.manual_file().write_text(json.dumps({"items": []}), "utf-8")
+for t_ in ("가", "나", "다"):
+    w.manual_add(t_)
+ss = {s["title"]: s for s in w.load_sessions() if s["src"] == "직접"}
+w.set_meta(ss["다"], prio=1)
+w.set_meta(ss["가"], prio=5)
+w.set_meta(ss["나"], prio=2, my_title="나 새이름")
+w.set_flag(ss["가"], "seen", True)
+order = [s["title"] for s in w.load_sessions() if s["src"] == "직접"]
+assert order == ["다", "나 새이름", "가"], order
+run_hook({"session_id": "pr-1", "hook_event_name": "Stop"})
+c = [s for s in w.load_sessions() if s["src"] == "Claude"][0]
+w.set_meta(c, prio=3, my_title="내 이름")
+run_hook({"session_id": "pr-1", "hook_event_name": "UserPromptSubmit", "prompt": "x"})
+c = [s for s in w.load_sessions() if s["src"] == "Claude"][0]
+assert c["title"] == "내 이름" and c["prio"] == 3 and c["state"] == "work", c
+w.set_meta(c, my_title=None, prio=None)
+c = [s for s in w.load_sessions() if s["src"] == "Claude"][0]
+assert c["title"] != "내 이름" and c["prio"] == 0
+
 print("ok")
