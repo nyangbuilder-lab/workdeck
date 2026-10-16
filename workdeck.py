@@ -696,6 +696,7 @@ def board():
         ui["home"] = y
     else:
         ui["home"] = y + h0 - 48
+    ui["max_h"] = int(num(pos.get("max_h"))) or None  # 손잡이로 줄여둔 높이
 
     # ---------------- 공통 부품: 알약 버튼, 동그란 체크
     def pill(parent, text, bg, fg, fn=None, size=8, bold=True):
@@ -766,6 +767,43 @@ def board():
         p.pack(fill="x")
     parts_below_head = (scroll_box,)
     scroll_box.pack(fill="x")
+
+    # 높이 손잡이: 펼쳐지는 쪽 끝(위로 자라면 맨 위, 아래로 자라면 맨 아래). 끌면 창 높이 조절, 더블클릭은 자동 높이
+    grip = tk.Frame(root, bg=CANVAS, height=12, cursor="sb_v_double_arrow")
+    grip.pack_propagate(False)
+    grip_line = tk.Canvas(grip, width=40, height=4, bg=CANVAS, highlightthickness=0, cursor="sb_v_double_arrow")
+    grip_line.create_line(2, 2, 38, 2, fill=HAIR, width=4, capstyle="round")
+    grip_line.place(relx=0.5, rely=0.5, anchor="center")
+
+    def place_grip():
+        grip.pack_forget()
+        if not ui["collapsed"]:
+            if grows_up():
+                grip.pack(fill="x", before=head)
+            else:
+                grip.pack(fill="x", side="bottom")
+
+    def grip_drag(e):
+        if not ui.get("gripping"):  # 손잡이를 눌러서 잡았을 때만
+            return
+        top, h, sh = root.winfo_y(), root.winfo_height(), root.winfo_screenheight()
+        total = (top + h - e.y_root) if grows_up() else (e.y_root - top)
+        ui["max_h"] = int(max(bar_h() + 160, min(total, sh - 56)))
+        ui["size"] = None
+        fit()
+
+    def grip_reset(_):
+        ui["max_h"] = None
+        ui["size"] = None
+        fit()
+
+    for w in (grip, grip_line):
+        w.bind("<ButtonPress-1>", lambda e: ui.update(gripping=True))
+        w.bind("<B1-Motion>", grip_drag)
+        w.bind("<ButtonRelease-1>", lambda e: (ui.update(gripping=False), save_pos()))
+        w.bind("<Double-Button-1>", grip_reset)
+        w.bind("<Enter>", lambda e: grip_line.itemconfig(1, fill=MUTED))
+        w.bind("<Leave>", lambda e: grip_line.itemconfig(1, fill=HAIR))
     ui["settings"] = False
     cfg0 = read_json(CONFIG)
     ui["reopen"] = bool(cfg0.pop("_reopen_settings", False))  # 테마 바꾸고 다시 켜졌으면 설정판을 다시 열어줌
@@ -781,6 +819,7 @@ def board():
                 settings.pack(fill="x")
             for p in parts_below_head:
                 p.pack(fill="x")
+        place_grip()
         fold_btn.config(text="＋" if ui["collapsed"] else "—")
         fit()
 
@@ -883,9 +922,12 @@ def board():
         root.update_idletasks()
         sh = root.winfo_screenheight()
         if not ui["collapsed"]:  # 스크롤 상자 높이 = 화면에 남는 만큼까지만, 넘치면 스크롤
-            rest = head.winfo_reqheight() + (settings.winfo_reqheight() if ui["settings"] else 0)
+            rest = head.winfo_reqheight() + grip.winfo_reqheight() + (
+                settings.winfo_reqheight() if ui["settings"] else 0)
             need = inner.winfo_reqheight()
             room = max(120, sh - 56 - 8 - rest)
+            if ui.get("max_h"):  # 손잡이로 줄여둔 높이가 있으면 그만큼까지만
+                room = min(room, max(120, ui["max_h"] - rest))
             ui["scroll"] = need > room
             scroll_box.config(height=min(need, room), scrollregion=(0, 0, WIDTH, need))
             if not ui["scroll"]:
@@ -894,8 +936,9 @@ def board():
         size = (WIDTH, root.winfo_reqheight())
         if size != ui["size"]:  # 크기가 바뀔 때만 (매번 바꾸면 깜빡임)
             ui["size"] = size
-            root.geometry(f"{size[0]}x{size[1]}+{root.winfo_x()}+{top_for(size[1])}")
-            save_pos()
+            top = top_for(size[1])
+            root.geometry(f"{size[0]}x{size[1]}+{root.winfo_x()}+{top}")
+            save_pos(top, size[1])  # 방금 정한 값으로 저장 (창이 아직 안 바뀐 순간이라 읽으면 예전 값이 나옴)
 
     # 제자리 = 접은 막대가 있는 자리. 펼치면 제자리를 기준으로 자라고, 접으면 정확히 제자리로 돌아감
     # (막대가 화면 아래쪽 절반에 있으면 위로, 위쪽 절반이면 아래로 펼쳐짐)
@@ -910,10 +953,12 @@ def board():
         top = ui["home"] if ui["collapsed"] or not grows_up() else ui["home"] + bar_h() - h
         return max(0, min(top, sh - h - 56))  # 화면·작업표시줄 밖으로 안 나가게
 
-    def save_pos():
+    def save_pos(top=None, h=None):
         root.update_idletasks()
-        write_json(pos_file, {"x": root.winfo_x(), "y": root.winfo_y(), "h": root.winfo_height(),
-                              "collapsed": ui["collapsed"], "home": ui["home"]})
+        write_json(pos_file, {"x": root.winfo_x(), "y": root.winfo_y() if top is None else top,
+                              "h": root.winfo_height() if h is None else h,
+                              "collapsed": ui["collapsed"], "home": ui["home"],
+                              "max_h": ui.get("max_h")})
 
     def drag_done(e):
         """실제로 끌어서 옮겼을 때만 그 자리가 새 제자리. 그냥 클릭·더블클릭은 무시"""
@@ -924,6 +969,7 @@ def board():
             ui["home"] = top
         else:  # 펼친 상태면 지금 자라는 방향 기준: 위로 자라는 중이면 아랫변이 제자리
             ui["home"] = top + h - bar_h() if grows_up() else top
+        place_grip()  # 화면 위·아래 절반을 넘나들면 손잡이도 반대쪽 끝으로
         save_pos()
 
     # 머리줄 잡고 끌어서 이동, 위치 기억
@@ -1400,8 +1446,7 @@ def board():
     root.geometry(f"{WIDTH}x{int(num(pos.get('h'), 100))}+{x}+{y}")  # 지난번 크기로 시작해야 아랫변 고정이 안 어긋남
     root.update()  # 창이 실제로 떠야 위치값을 읽을 수 있음
     round_window(root)
-    if pos.get("collapsed"):  # 접어둔 채로 껐으면 접힌 채로 시작
-        toggle(True)
+    toggle(bool(pos.get("collapsed")))  # 접어둔 채로 껐으면 접힌 채로 시작 (높이 손잡이 자리도 여기서 잡힘)
     draw_addbar()
     if ui["reopen"]:
         open_settings(True)
