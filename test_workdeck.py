@@ -80,4 +80,18 @@ for _ in range(4):
     w.manual_next_state(s)
 assert views == ["work", "review", "seen", "work"], views
 
+# 8) 제목 클릭 → Claude 앱 대화 번호(local_…)를 찾아 claude:// 주소로 열기
+app = home / "AppData" / "Roaming"
+os.environ["APPDATA"] = str(app)
+sess = app / "Claude" / "claude-code-sessions" / "acct" / "org"
+sess.mkdir(parents=True)
+(sess / "local_aaa-111.json").write_text(json.dumps({"sessionId": "local_aaa-111", "cliSessionId": "cli-1"}), "utf-8")
+(sess / "local_evil.json").write_text(json.dumps({"sessionId": "local_x&rm", "cliSessionId": "cli-2"}), "utf-8")
+opened = []
+w.os.startfile = opened.append
+assert w.open_claude_session("cli-1") and opened == ["claude://code/continue?session=local_aaa-111&source=desktop_action"]
+assert not w.open_claude_session("cli-2")          # 이상한 앱 번호는 열지 않음
+assert not w.open_claude_session("../x") and not w.open_claude_session("none")
+assert len(opened) == 1
+
 print("ok")

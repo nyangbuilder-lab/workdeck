@@ -301,6 +301,27 @@ def claude_sessions(now):
     return out
 
 
+def claude_app_session_dirs():
+    """Claude 데스크톱 앱이 대화 목록을 저장하는 폴더 (일반 설치 / 스토어(MSIX) 설치 둘 다)"""
+    dirs = [Path(os.environ.get("APPDATA", "")) / "Claude" / "claude-code-sessions"]
+    dirs += Path(os.environ.get("LOCALAPPDATA", "")).glob("Packages/Claude_*/LocalCache/Roaming/Claude/claude-code-sessions")
+    return [d for d in dirs if d.is_dir()]
+
+
+def open_claude_session(cli_id):
+    """Claude 앱에서 그 대화 열기. 앱이 쓰는 대화 번호(local_…)를 찾아 claude://code/continue 주소로 엶"""
+    if not SAFE_ID.fullmatch(str(cli_id)):
+        return False
+    files = [f for d in claude_app_session_dirs() for f in d.glob("*/*/local_*.json")]
+    for f in sorted(files, key=lambda p: p.stat().st_mtime, reverse=True):  # 최근 대화부터
+        d = read_json(f)
+        app_id = str(d.get("sessionId", ""))
+        if d.get("cliSessionId") == cli_id and re.fullmatch(r"local_[A-Za-z0-9-]{1,64}", app_id):
+            os.startfile(f"claude://code/continue?session={app_id}&source=desktop_action")
+            return True
+    return False
+
+
 # Codex는 훅 대신 대화기록(~/.codex/sessions/**/rollout-*.jsonl)을 읽어서 상태를 판단.
 # Codex의 notify 설정은 다른 기능(컴퓨터 사용 등)이 쓰고 있을 수 있어서 건드리지 않음.
 def codex_state(f):
@@ -909,13 +930,16 @@ def board():
         folder = Path(str(s.get("cwd", ""))).name
         return "" if folder.startswith("scratch-") else folder  # 앱이 만든 임시 폴더 이름은 숨김
 
-    def row(s, hidden_list=False):
-        label, pbg, pfg = STATUS[s["view"]]
+    def meta_text(s):
         el = ago(time.time() - s["since"])
         if el == "방금":
             wait = "방금 시작" if s["view"] == "work" else "방금 끝남"
         else:
             wait = {"work": f"{el}째 작업중", "seen": f"{el} 전 끝남"}.get(s["view"], f"{el}째 기다리는 중")
+        return " · ".join(x for x in (s["src"], folder_of(s)[:14], wait) if x)
+
+    def row(s, hidden_list=False):
+        label, pbg, pfg = STATUS[s["view"]]
         done = s["view"] == "seen" or hidden_list
 
         r = tk.Frame(body, bg=CANVAS, padx=16, pady=8)
@@ -926,12 +950,18 @@ def board():
         check(r, bool(s.get("seen")), fn).grid(row=0, column=0, rowspan=2, sticky="n", padx=(0, 10), pady=2)
         text = (s.get("title") or s.get("last") or folder_of(s) or "새 대화")[:24]
         fg = FAINT if done else MUTED if s["view"] == "work" else INK
-        tk.Label(r, text=text, bg=CANVAS, fg=fg, font=(FONT, 10, "bold"), anchor="w").grid(row=0, column=1, sticky="w")
+        title = tk.Label(r, text=text, bg=CANVAS, fg=fg, font=(FONT, 10, "bold"), anchor="w")
+        title.grid(row=0, column=1, sticky="w")
+        if s["src"] == "Claude":  # 제목을 누르면 Claude 앱에서 그 대화로 바로 이동
+            title.config(cursor="hand2")
+            title.bind("<Enter>", lambda e: title.config(fg=ACCENT))
+            title.bind("<Leave>", lambda e: title.config(fg=fg))
+            title.bind("<Button-1>", lambda e: open_claude_session(s["file"].stem))
         pill_fn = (lambda: act(lambda: manual_next_state(s))) if s["src"] == "직접" else fn
         pill(r, label, pbg, pfg, pill_fn).grid(row=0, column=2, sticky="e")
-        meta = " · ".join(x for x in (s["src"], folder_of(s)[:14], wait) if x)
-        tk.Label(r, text=meta, bg=CANVAS, fg=FAINT if done else MUTED, font=(FONT, 8),
-                 anchor="w").grid(row=1, column=1, sticky="w", pady=(2, 0))
+        meta = tk.Label(r, text=meta_text(s), bg=CANVAS, fg=FAINT if done else MUTED, font=(FONT, 8), anchor="w")
+        meta.grid(row=1, column=1, sticky="w", pady=(2, 0))
+        ui["metas"].append((meta, s))  # "몇 분째"는 목록을 다시 그리지 않고 이 글자만 바꿈
         if hidden_list:
             btns = tk.Frame(r, bg=CANVAS)
             btns.grid(row=1, column=2, sticky="e", pady=(4, 0))
@@ -956,16 +986,23 @@ def board():
             count = {k: sum(s["view"] == k for s in shown) for k in ("answer", "review", "work")}
             short = {"answer": "답변", "review": "검토", "work": "작업"}  # 머리줄 버튼이 밀려나지 않게 짧게
             parts = [f"{short[k]} {count[k]}" for k in ("answer", "review", "work") if count[k]]
-            summary.config(text=" · ".join(parts) or "쉬는 중", fg=INK if need else MUTED)
-            dot.config(fg=ACCENT if need else CANVAS)
+            head_look = (" · ".join(parts) or "쉬는 중", INK if need else MUTED, ACCENT if need else CANVAS)
+            if head_look != ui.get("head_look"):  # 바뀔 때만 다시 칠함
+                ui["head_look"] = head_look
+                summary.config(text=head_look[0], fg=head_look[1])
+                dot.config(fg=head_look[2])
 
-            # 화면에 보일 내용이 그대로면 다시 그리지 않음 → 깜빡임 없음
-            now = time.time()
+            # 목록 모양(대화·상태·제목)이 바뀔 때만 다시 그림. "몇 분째"는 글자만 바꿔서 깜빡임 없음
             sig = (tuple((str(s["file"]), s.get("id"), s["view"], s["hidden"], s.get("title"), s.get("cwd"),
-                          ago(now - s["since"])) for s in sessions), ui["show_hidden"])
+                          s["since"]) for s in sessions), ui["show_hidden"])
             if sig != ui["sig"]:
                 ui["sig"] = sig
                 draw_sessions(shown, hidden)
+            else:
+                for lbl, s in ui["metas"]:
+                    t = meta_text(s)
+                    if lbl.cget("text") != t:
+                        lbl.config(text=t)
             reload_todo_if_changed()
         finally:
             if reschedule:
@@ -1000,6 +1037,7 @@ def board():
         fit()
 
     def draw_sessions(shown, hidden):
+        ui["metas"] = []
         for w in body.winfo_children():
             w.destroy()
         for s in shown:
